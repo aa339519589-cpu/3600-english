@@ -1,4 +1,5 @@
 import express from 'express'
+import { load } from 'cheerio'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,6 +15,9 @@ const vocabularyByWord = new Map(
 )
 
 let dailyCache = null
+const MIN_READING_WORDS = 400
+const TARGET_READING_WORDS = 500
+const MAX_READING_WORDS = 600
 
 function chicagoDate(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -26,24 +30,82 @@ function chicagoDate(date = new Date()) {
   return `${values.year}-${values.month}-${values.day}`
 }
 
-function splitIntoParagraphs(extract) {
-  const cleaned = extract.replace(/\s+/g, ' ').trim()
-  const sentences = cleaned.match(/[^.!?]+[.!?]+/g) ?? [cleaned]
+function countWords(text) {
+  return text.trim().split(/\s+/).filter(Boolean).length
+}
+
+function truncateAtSentence(text, maxWords) {
+  const sentences = text.match(/[^.!?]+[.!?]+(?:["'”’)]*)/g) ?? [text]
   const selected = []
-  let totalLength = 0
+  let total = 0
+
   for (const sentence of sentences) {
-    if (totalLength > 1450) break
-    const value = sentence.trim()
-    if (value.length < 20) continue
-    selected.push(value)
-    totalLength += value.length
+    const words = sentence.trim().split(/\s+/)
+    if (total + words.length > maxWords) break
+    selected.push(sentence.trim())
+    total += words.length
   }
 
-  const paragraphs = []
-  for (let index = 0; index < selected.length; index += 3) {
-    paragraphs.push(selected.slice(index, index + 3).join(' '))
+  return selected.join(' ')
+}
+
+function selectReadingLength(candidates) {
+  const selected = []
+  let total = 0
+
+  for (const paragraph of candidates) {
+    if (total >= TARGET_READING_WORDS) break
+    const paragraphWords = countWords(paragraph)
+    if (total + paragraphWords <= MAX_READING_WORDS) {
+      selected.push(paragraph)
+      total += paragraphWords
+      continue
+    }
+
+    const remaining = MAX_READING_WORDS - total
+    const partial = truncateAtSentence(paragraph, remaining)
+    if (countWords(partial) >= 30) {
+      selected.push(partial)
+      total += countWords(partial)
+    }
+    break
   }
-  return paragraphs.slice(0, 4)
+
+  if (total < MIN_READING_WORDS || total > MAX_READING_WORDS) {
+    throw new Error(`Full article produced ${total} words; expected 400-600`)
+  }
+  return selected
+}
+
+function extractArticleParagraphs(html) {
+  const $ = load(html)
+  $('sup, style, table, figure, .mw-editsection, .reference, .navbox').remove()
+  const candidates = $('.mw-parser-output > p')
+    .map((_index, element) => $(element).text().replace(/\s+/g, ' ').trim())
+    .get()
+    .filter((paragraph) => countWords(paragraph) >= 30)
+  return selectReadingLength(candidates)
+}
+
+async function fetchArticleParagraphs(pageId) {
+  const params = new URLSearchParams({
+    action: 'parse',
+    pageid: String(pageId),
+    prop: 'text',
+    format: 'json',
+    formatversion: '2',
+    origin: '*',
+  })
+  const response = await fetch(`https://en.wikipedia.org/w/api.php?${params}`, {
+    headers: {
+      'Api-User-Agent': 'Stillword/3.0 (https://github.com/aa339519589-cpu/3600-english)',
+    },
+    signal: AbortSignal.timeout(12_000),
+  })
+  if (!response.ok) throw new Error(`Wikipedia article returned ${response.status}`)
+  const result = await response.json()
+  if (!result.parse?.text) throw new Error('Wikipedia article body is incomplete')
+  return extractArticleParagraphs(result.parse.text)
 }
 
 function pickReadingWords(text, title) {
@@ -84,7 +146,7 @@ async function fetchDailyReading(dateKey) {
   const featured = feed.tfa
   if (!featured?.extract || !featured?.titles?.normalized) throw new Error('Featured article is incomplete')
 
-  const paragraphs = splitIntoParagraphs(featured.extract)
+  const paragraphs = await fetchArticleParagraphs(featured.pageid)
   const correctDescription = featured.description || paragraphs[0].split('.')[0]
   const distractors = (feed.mostread?.articles ?? [])
     .map((article) => article.description)
@@ -92,15 +154,17 @@ async function fetchDailyReading(dateKey) {
     .slice(0, 2)
   const choices = shuffleWithDate([correctDescription, ...distractors], dateKey)
   const text = paragraphs.join(' ')
+  const wordCount = countWords(text)
 
   return {
     id: `wiki-${dateKey}-${featured.pageid}`,
     title: featured.titles.normalized,
     deck: featured.description || 'Wikimedia featured article',
     level: 'middle',
-    minutes: Math.max(3, Math.ceil(text.split(/\s+/).length / 180)),
+    minutes: Math.max(3, Math.ceil(wordCount / 180)),
     dateLabel: dateKey,
     paragraphs,
+    wordCount,
     words: pickReadingWords(text, featured.titles.normalized),
     question: 'Which description best matches today’s article?',
     choices,

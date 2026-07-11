@@ -70,6 +70,7 @@ export interface ReadingArticle {
   minutes: number
   dateLabel: string
   paragraphs: string[]
+  wordCount?: number
   words: ReadingWord[]
   question: string
   choices: string[]

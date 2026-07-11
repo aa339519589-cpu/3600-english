@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "cheerio": "^1.2.0",
     "express": "^5.2.1",
     "lucide-react": "latest",
     "react": "latest",
