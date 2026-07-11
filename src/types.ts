@@ -17,6 +17,12 @@ export interface GrammarChallenge {
   takeaway: string
 }
 
+export interface GrammarExample {
+  sentence: string
+  note: string
+  focus: string
+}
+
 export interface GrammarLesson {
   id: string
   number: string
@@ -25,6 +31,8 @@ export interface GrammarLesson {
   englishTitle: string
   duration: number
   description: string
+  stage: number
+  examples: GrammarExample[]
   challenge?: GrammarChallenge
 }
 
@@ -67,6 +75,12 @@ export interface ReadingArticle {
   choices: string[]
   answer: string
   reflection: string
+  source?: {
+    name: string
+    url?: string
+  }
+  isLive?: boolean
+  publishedDate?: string
 }
 
 export interface VocabularyProgress {
@@ -76,18 +90,23 @@ export interface VocabularyProgress {
   dueAt: string
   saved: boolean
   lastSeenAt: string
+  lastRating?: ReviewRating
+  lapses?: number
 }
+
+export type ReviewRating = 'forgot' | 'fuzzy' | 'known'
 
 export interface AppProgress {
   version: 1
   preferences: {
     grammarLevel: Level
+    grammarStage: number
     vocabularyLevel: Level
     dailyMinutes: number
   }
   activityDates: string[]
-  grammar: Record<string, { completed: boolean; attempts: number; correct: number }>
+  grammar: Record<string, { completed: boolean; attempts: number; correct: number; completedAt?: string }>
   vocabulary: Record<string, VocabularyProgress>
-  reading: Record<string, { completed: boolean; answer: string; savedWords: string[] }>
+  reading: Record<string, { completed: boolean; answer: string; savedWords: string[]; completedAt?: string }>
   resume: { section: Section; itemId?: string }
 }

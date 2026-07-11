@@ -1,5 +1,6 @@
 import { ArrowUpRight, BookOpenText, Check, Clock3, Languages, Newspaper } from 'lucide-react'
-import { getTodayReading } from '../data/readings'
+import { useDailyReading } from '../hooks/useDailyReading'
+import { grammarLessons } from '../data/grammar'
 import { toDateKey } from '../lib/progress'
 import type { AppProgress, Section } from '../types'
 
@@ -15,10 +16,15 @@ function calculateStreak(dates: string[]): number {
 }
 
 export function TodayView({ progress, navigate }: { progress: AppProgress; navigate: (section: Section) => void }) {
-  const todayReading = getTodayReading()
-  const grammarDone = Object.values(progress.grammar).some((lesson) => lesson.completed)
-  const wordsMet = Object.values(progress.vocabulary).filter((word) => word.seen > 0).length
-  const readingDone = Boolean(progress.reading[todayReading.id]?.completed)
+  const { article: todayReading, status: readingStatus } = useDailyReading()
+  const todayKey = toDateKey()
+  const currentStageLessons = grammarLessons.filter((lesson) => lesson.stage === progress.preferences.grammarStage)
+  const nextGrammar = currentStageLessons.find((lesson) => !progress.grammar[lesson.id]?.completed) ?? currentStageLessons[0]
+  const happenedToday = (timestamp?: string) => Boolean(timestamp && toDateKey(new Date(timestamp)) === todayKey)
+  const grammarDone = Object.values(progress.grammar).some((lesson) => happenedToday(lesson.completedAt))
+  const wordsMet = Object.values(progress.vocabulary).filter((word) => happenedToday(word.lastSeenAt)).length
+  const dueWords = Object.values(progress.vocabulary).filter((word) => word.seen > 0 && word.dueAt <= todayKey).length
+  const readingDone = Boolean(progress.reading[todayReading.id]?.completed && happenedToday(progress.reading[todayReading.id]?.completedAt))
   const completedTasks = Number(grammarDone) + Number(wordsMet >= 6) + Number(readingDone)
   const streak = calculateStreak(progress.activityDates)
   const dateLabel = new Intl.DateTimeFormat('zh-CN', {
@@ -32,16 +38,16 @@ export function TodayView({ progress, navigate }: { progress: AppProgress; navig
       id: 'grammar' as const,
       icon: BookOpenText,
       kicker: '语感练习',
-      title: '一句话的骨架',
+      title: nextGrammar?.title ?? '继续语法路径',
       minutes: 6,
       done: grammarDone,
-      tone: 'green',
+      tone: 'indigo',
     },
     {
       id: 'vocabulary' as const,
       icon: Languages,
       kicker: '今日词汇',
-      title: '在句子里遇见 6 个词',
+      title: dueWords ? '复习到期词' : '学习 6 个新词',
       minutes: 6,
       done: wordsMet >= 6,
       tone: 'red',
@@ -49,7 +55,7 @@ export function TodayView({ progress, navigate }: { progress: AppProgress; navig
     {
       id: 'reading' as const,
       icon: Newspaper,
-      kicker: '每日短文',
+      kicker: readingStatus === 'live' ? '今日更新' : readingStatus === 'loading' ? '更新中' : '离线精选',
       title: todayReading.title,
       minutes: todayReading.minutes,
       done: readingDone,
@@ -107,7 +113,7 @@ export function TodayView({ progress, navigate }: { progress: AppProgress; navig
             <img src="/assets/book-study.jpg" alt="一摞有阅读痕迹的书，书页边缘清晰可见" />
             <div className="reading-preview-copy">
               <div className="preview-topline">
-                <span>今日阅读</span>
+                <span>{readingStatus === 'live' ? '今日实时' : readingStatus === 'loading' ? '正在更新' : '离线精选'}</span>
                 <span>{todayReading.minutes} MIN</span>
               </div>
               <h2>{todayReading.title}</h2>

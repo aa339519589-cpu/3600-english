@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
-import { Bookmark, Check, CheckCircle2, Clock3, Minus, Plus, Volume2 } from 'lucide-react'
+import { Bookmark, Check, CheckCircle2, Clock3, ExternalLink, Minus, Plus, Volume2 } from 'lucide-react'
 import vocabularyData from '../data/vocabulary.json'
-import { getTodayReading, readings } from '../data/readings'
+import { readings } from '../data/readings'
+import { useDailyReading } from '../hooks/useDailyReading'
 import { markReadingCompleted, toggleSavedWord } from '../lib/progress'
 import type { AppProgress, ReadingArticle, ReadingWord, VocabularyWord } from '../types'
 
@@ -28,6 +29,11 @@ function speak(text: string) {
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function findVocabularyWord(readingWord: ReadingWord) {
+  const target = inflectionRoots[readingWord.word.toLowerCase()] ?? readingWord.word.toLowerCase()
+  return vocabulary.find((word) => word.word.toLowerCase() === target)
 }
 
 function ReadingParagraph({
@@ -64,37 +70,47 @@ export function ReadingView({
   progress: AppProgress
   setProgress: React.Dispatch<React.SetStateAction<AppProgress>>
 }) {
-  const todayReading = getTodayReading()
-  const [article, setArticle] = useState<ReadingArticle>(todayReading)
+  const { article: todayReading, status: dailyStatus } = useDailyReading()
+  const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null)
   const [activeWord, setActiveWord] = useState<ReadingWord | null>(null)
-  const [answer, setAnswer] = useState('')
+  const [answers, setAnswers] = useState<Record<string, string>>({})
   const [fontSize, setFontSize] = useState(20)
-  const [savedWordIds, setSavedWordIds] = useState<string[]>(progress.reading[todayReading.id]?.savedWords ?? [])
+  const articleList = useMemo(
+    () => [todayReading, ...readings.filter((item) => item.id !== todayReading.id)],
+    [todayReading],
+  )
+  const article = selectedArticleId
+    ? articleList.find((item) => item.id === selectedArticleId) ?? todayReading
+    : todayReading
+  const answer = answers[article.id] ?? progress.reading[article.id]?.answer ?? ''
   const isCorrect = answer === article.answer
   const completed = Boolean(progress.reading[article.id]?.completed)
+  const savedWordIds = useMemo(
+    () => article.words
+      .map(findVocabularyWord)
+      .filter((word): word is VocabularyWord => Boolean(word && progress.vocabulary[word.id]?.saved))
+      .map((word) => word.id),
+    [article.words, progress.vocabulary],
+  )
 
   const activeVocabularyWord = useMemo(() => {
     if (!activeWord) return undefined
-    const target = inflectionRoots[activeWord.word.toLowerCase()] ?? activeWord.word.toLowerCase()
-    return vocabulary.find((word) => word.word.toLowerCase() === target)
+    return findVocabularyWord(activeWord)
   }, [activeWord])
 
   const switchArticle = (nextArticle: ReadingArticle) => {
-    setArticle(nextArticle)
+    setSelectedArticleId(nextArticle.id === todayReading.id ? null : nextArticle.id)
     setActiveWord(null)
-    setAnswer(progress.reading[nextArticle.id]?.answer ?? '')
-    setSavedWordIds(progress.reading[nextArticle.id]?.savedWords ?? [])
   }
 
   const saveActiveWord = () => {
     if (!activeVocabularyWord) return
     const id = activeVocabularyWord.id
     setProgress((current) => toggleSavedWord(current, id))
-    setSavedWordIds((current) => current.includes(id) ? current.filter((wordId) => wordId !== id) : [...current, id])
   }
 
   const chooseAnswer = (choice: string) => {
-    setAnswer(choice)
+    setAnswers((current) => ({ ...current, [article.id]: choice }))
     if (choice === article.answer) {
       setProgress((current) => markReadingCompleted(current, article.id, choice, savedWordIds))
     }
@@ -117,16 +133,16 @@ export function ReadingView({
         <div className="page-inner reader-layout">
           <aside className="article-index">
             <div className="index-heading">
-              <p className="eyebrow">最近三篇</p>
-              <span>{readings.filter((item) => progress.reading[item.id]?.completed).length} / {readings.length} 已读</span>
+              <p className="eyebrow">最近阅读</p>
+              <span>{articleList.filter((item) => progress.reading[item.id]?.completed).length} / {articleList.length} 已读</span>
             </div>
             <div className="article-index-list">
-              {readings.map((item) => {
+              {articleList.map((item) => {
                 const isActive = item.id === article.id
                 const isDone = Boolean(progress.reading[item.id]?.completed)
                 return (
                   <button className={isActive ? 'article-index-item active' : 'article-index-item'} type="button" key={item.id} onClick={() => switchArticle(item)}>
-                    <span className="article-date">{item.id === todayReading.id ? '今日' : '往日'}</span>
+                    <span className="article-date">{item.id === todayReading.id ? (dailyStatus === 'live' ? '今日更新' : '今日') : '往日'}</span>
                     <strong>{item.title}</strong>
                     <span>{item.minutes} 分钟</span>
                     {isDone && <CheckCircle2 size={17} aria-label="已完成" />}
@@ -144,6 +160,11 @@ export function ReadingView({
                 {completed && <span className="article-complete"><Check size={13} /> COMPLETED</span>}
               </div>
               <h2>{article.title}</h2>
+              {article.source?.url && (
+                <a className="article-source" href={article.source.url} target="_blank" rel="noreferrer">
+                  {article.source.name} <ExternalLink size={13} />
+                </a>
+              )}
               <div className="reader-tools" aria-label="阅读工具">
                 <button className="icon-button" type="button" disabled={fontSize === 18} onClick={() => setFontSize((size) => size - 2)} aria-label="缩小正文字号" title="缩小字号">
                   <Minus size={16} />
@@ -198,7 +219,7 @@ export function ReadingView({
                   )
                 })}
               </div>
-              {answer && !isCorrect && <p className="answer-note wrong" role="alert">再回到最后一段：人物的动作改变了什么，而不只是发生了什么？</p>}
+              {answer && !isCorrect && <p className="answer-note wrong" role="alert">再看一遍正文，找最接近全文中心的描述。</p>}
               {isCorrect && (
                 <div className="reading-reflection" aria-live="polite">
                   <CheckCircle2 size={20} />

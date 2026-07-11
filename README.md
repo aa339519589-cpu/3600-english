@@ -4,9 +4,9 @@
 
 ## 已实现
 
-- 语法：起步、中阶、进阶共 12 节可完成课程，固定采用“看情境 -> 凭感觉选 -> 看差异 -> 换情境再用”。
-- 词汇：完整 3600 条高中范围词库，基础、中阶、拔高各 1200 词；支持中英文搜索、分页、发音、词本和间隔复习状态。
-- 每日阅读：3 篇原创短文按本地日期轮换，支持点词释义、收藏进词本、全文朗读和理解题。
+- 语法：6 阶段、48 小节，按顺序解锁；每节采用“三个例句 -> 凭感觉判断 -> 规则点明 -> 换情境迁移”。
+- 词汇：完整 3600 条高中范围词库，基础、中阶、拔高各 1200 词；支持“忘了 / 模糊 / 记得”评分、到期复习、掌握状态、搜索、发音和词本。
+- 每日阅读：服务端按 America/Chicago 日期读取 Wikimedia 当日精选，缓存当日结果；上游暂时不可用时自动回退到内置短文。
 - 进度：使用 `localStorage` 保存在当前浏览器，无需登录，并同步同源的其他标签页。
 - 响应式：覆盖 375、768、1024、1440 像素宽度，并支持 `prefers-reduced-motion`。
 
@@ -39,10 +39,10 @@ work/.venv/bin/python scripts/build_vocabulary.py
 
 ## Render 部署
 
-根目录的 `render.yaml` 将项目配置为 Render Static Site：
+根目录的 `render.yaml` 将项目配置为 Render Node Web Service：
 
 - Build command: `npm ci && npm run build`
-- Publish directory: `./dist`
-- SPA rewrite: `/* -> /index.html`
+- Start command: `npm start`
+- Health check: `/api/health`
 
 连接 GitHub 仓库后，Render 会在后续 push 时自动重新部署。

@@ -1,7 +1,7 @@
-import type { AppProgress, Level, Section } from '../types'
+import type { AppProgress, Level, ReviewRating, Section, VocabularyProgress } from '../types'
 
 export const PROGRESS_STORAGE_KEY = 'stillword:v1'
-const REVIEW_INTERVALS = [0, 1, 3, 7, 14, 30]
+const REVIEW_INTERVALS = [1, 1, 3, 7, 14, 30]
 const LEVELS: Level[] = ['basic', 'middle', 'advanced']
 const SECTIONS: Section[] = ['today', 'grammar', 'vocabulary', 'reading']
 
@@ -17,6 +17,7 @@ export function createDefaultProgress(): AppProgress {
     version: 1,
     preferences: {
       grammarLevel: 'basic',
+      grammarStage: 1,
       vocabularyLevel: 'basic',
       dailyMinutes: 15,
     },
@@ -48,6 +49,10 @@ export function mergeProgress(value: unknown): AppProgress {
     version: 1,
     preferences: {
       grammarLevel: safeLevel(preferences.grammarLevel, defaults.preferences.grammarLevel),
+      grammarStage:
+        typeof preferences.grammarStage === 'number' && preferences.grammarStage >= 1 && preferences.grammarStage <= 6
+          ? preferences.grammarStage
+          : defaults.preferences.grammarStage,
       vocabularyLevel: safeLevel(preferences.vocabularyLevel, defaults.preferences.vocabularyLevel),
       dailyMinutes:
         typeof preferences.dailyMinutes === 'number' && preferences.dailyMinutes > 0
@@ -107,6 +112,7 @@ export function markGrammarCompleted(
         completed: true,
         attempts: previous.attempts + 1,
         correct: previous.correct + (correct ? 1 : 0),
+        completedAt: now.toISOString(),
       },
     },
     resume: { section: 'grammar', itemId: id },
@@ -119,6 +125,15 @@ export function updateVocabularyProgress(
   correct: boolean,
   options: { saved?: boolean; now?: Date } = {},
 ): AppProgress {
+  return reviewVocabularyWord(progress, id, correct ? 'known' : 'forgot', options)
+}
+
+export function reviewVocabularyWord(
+  progress: AppProgress,
+  id: string,
+  rating: ReviewRating,
+  options: { saved?: boolean; now?: Date } = {},
+): AppProgress {
   const now = options.now ?? new Date()
   const previous = progress.vocabulary[id] ?? {
     stage: 0,
@@ -128,7 +143,11 @@ export function updateVocabularyProgress(
     saved: false,
     lastSeenAt: now.toISOString(),
   }
-  const stage = correct ? Math.min(5, previous.stage + 1) : Math.max(0, previous.stage - 1)
+  const stage = rating === 'known'
+    ? Math.min(5, previous.stage + 1)
+    : rating === 'fuzzy'
+      ? Math.max(0, previous.stage)
+      : Math.max(0, previous.stage - 1)
   const due = new Date(now)
   due.setDate(due.getDate() + REVIEW_INTERVALS[stage])
 
@@ -140,14 +159,24 @@ export function updateVocabularyProgress(
       [id]: {
         stage,
         seen: previous.seen + 1,
-        correct: previous.correct + (correct ? 1 : 0),
+        correct: previous.correct + (rating === 'known' ? 1 : 0),
         dueAt: toDateKey(due),
         saved: options.saved ?? previous.saved,
         lastSeenAt: now.toISOString(),
+        lastRating: rating,
+        lapses: (previous.lapses ?? 0) + (rating === 'forgot' ? 1 : 0),
       },
     },
     resume: { section: 'vocabulary', itemId: id },
   }
+}
+
+export type VocabularyStatus = 'new' | 'learning' | 'due' | 'mastered'
+
+export function getVocabularyStatus(state?: VocabularyProgress, now = new Date()): VocabularyStatus {
+  if (!state || state.seen === 0) return 'new'
+  if (state.dueAt <= toDateKey(now)) return 'due'
+  return state.stage >= 4 ? 'mastered' : 'learning'
 }
 
 export function toggleSavedWord(progress: AppProgress, id: string, now = new Date()): AppProgress {
@@ -180,7 +209,7 @@ export function markReadingCompleted(
     activityDates: withActivityDate(progress, now),
     reading: {
       ...progress.reading,
-      [id]: { completed: true, answer, savedWords },
+      [id]: { completed: true, answer, savedWords, completedAt: now.toISOString() },
     },
     resume: { section: 'reading', itemId: id },
   }
